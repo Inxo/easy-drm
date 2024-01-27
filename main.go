@@ -92,7 +92,9 @@ func main() {
 		return
 	}
 	keyArgs := os.Args[2]
-	key = []byte(keyArgs)
+	if len(os.Args) > 2 {
+		key = []byte(keyArgs)
+	}
 	fmt.Println("Key: " + string(key))
 
 	// Шифрование видео
