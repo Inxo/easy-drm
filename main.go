@@ -71,6 +71,11 @@ func writeToFile(data []byte, filename string) error {
 }
 
 func main() {
+
+	if len(os.Args) < 3 {
+		fmt.Println("Ошибка параметров: input key output")
+		return
+	}
 	// Загрузка видео из файла MP4
 	inputFilename := os.Args[1]
 	videoData, err := os.ReadFile(inputFilename)
@@ -86,7 +91,8 @@ func main() {
 		fmt.Println("Ошибка при генерации ключа:", err)
 		return
 	}
-	key = []byte("12312312312312313212312312312312")
+	keyArgs := os.Args[2]
+	key = []byte(keyArgs)
 	fmt.Println("Key: " + string(key))
 
 	// Шифрование видео
@@ -98,6 +104,9 @@ func main() {
 
 	// Сохранение зашифрованного видео в файл
 	outputFilename := "encrypted_output.mp4"
+	if len(os.Args) > 3 {
+		outputFilename = os.Args[3]
+	}
 	err = writeToFile(encryptedVideo, outputFilename)
 	if err != nil {
 		fmt.Println("Ошибка при сохранении файла:", err)
