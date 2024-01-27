@@ -8,15 +8,12 @@
 <body>
 <script>
     async function decryptMP4(encryptedData, key) {
-        // Ensure that the key length is appropriate for the chosen algorithm
         if (key.length !== 32) {
             console.error('Invalid key length. Expected 32 bytes (256 bits).');
             return null;
         }
-
         const iv = encryptedData.slice(0, 16);
         const encryptedContent = encryptedData.slice(16);
-
         try {
             const importedKey = await crypto.subtle.importKey(
                 'raw',
@@ -25,25 +22,19 @@
                 true,
                 ["decrypt", "encrypt"]
             );
-
-            const decryptedContent = await crypto.subtle.decrypt(
-                { name: 'AES-CBC', iv: iv },
+            return await crypto.subtle.decrypt(
+                {name: 'AES-CBC', iv: iv},
                 importedKey,
                 new Uint8Array(encryptedContent)
             );
-
-            return decryptedContent;
         } catch (error) {
             console.error('Error during decryption:', error);
             return null;
         }
     }
-
     function arrayBufferToHex(buffer) {
         return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
     }
-
-    // Load the encrypted MP4 data (replace 'encrypted_input.mp4' with your file path)
     fetch('encrypted_output.mp4')
         .then(response => response.arrayBuffer())
         .then(async encryptedArrayBuffer => {
