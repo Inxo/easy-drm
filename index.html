@@ -26,15 +26,11 @@
                 ["decrypt", "encrypt"]
             );
 
-            console.log('Imported key:', importedKey);
-
             const decryptedContent = await crypto.subtle.decrypt(
                 { name: 'AES-CBC', iv: iv },
                 importedKey,
                 new Uint8Array(encryptedContent)
             );
-
-            console.log('Decrypted content:', decryptedContent);
 
             return decryptedContent;
         } catch (error) {
@@ -51,32 +47,18 @@
     fetch('encrypted_output.mp4')
         .then(response => response.arrayBuffer())
         .then(async encryptedArrayBuffer => {
-            // Your decryption key (replace 'yourDecryptionKey' with your key)
             const decryptionKey = new TextEncoder().encode('12312312312312313212312312312312');
-
-            // Decrypt the MP4 data
             const decryptedArrayBuffer = await decryptMP4(new Uint8Array(encryptedArrayBuffer), decryptionKey);
 
             if (decryptedArrayBuffer) {
-                // Convert the decrypted data to hex (for demonstration purposes)
                 const decryptedHex = arrayBufferToHex(decryptedArrayBuffer);
-
-                // Create a Blob from the decrypted data
                 const decryptedBlob = new Blob([decryptedArrayBuffer], { type: 'video/mp4' });
-
-                // Create a URL for the Blob
                 const decryptedUrl = URL.createObjectURL(decryptedBlob);
-
-                // Create video element
                 const video = document.createElement('video');
                 video.src = decryptedUrl;
                 video.controls = true;
-
-                // Append video element to the body
                 document.body.appendChild(video);
-
-                // You can now use the decrypted data as needed
-                console.log('Decrypted MP4 data:', decryptedHex);
+                // console.log('Decrypted MP4 data:', decryptedHex);
             } else {
                 console.error('Decryption failed.');
             }
