@@ -35,7 +35,7 @@
     function arrayBufferToHex(buffer) {
         return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
     }
-    fetch('encrypted_output.mp4')
+    fetch('http://localhost:8080/stream')
         .then(response => response.arrayBuffer())
         .then(async encryptedArrayBuffer => {
             const decryptionKey = new TextEncoder().encode('12312312312312313212312312312312');

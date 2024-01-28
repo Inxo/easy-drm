@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decrypted Video Stream</title>
+</head>
+<body>
+<video id="decryptedVideo" controls></video>
+<script>
+    const key = "12312312312312313212312312312312"; // Replace with your actual key
+    const sourceUrl = 'http://localhost:8080/stream'; // Replace with your server URL
+
+    async function decryptVideo() {
+        const response = await fetch(sourceUrl);
+        const reader = response.body.getReader();
+
+        const keyBuffer = new TextEncoder().encode(key);
+        const iv = new Uint8Array(16); // Initialization vector
+
+        const keyObject = await crypto.subtle.importKey(
+            'raw',
+            keyBuffer,
+            { name: 'AES-CTR', length: 128 },
+            false,
+            ['decrypt']
+        );
+
+        let decryptedData = [];
+        let totalDecryptedSize = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const decryptedBuffer = await crypto.subtle.decrypt(
+                { name: 'AES-CTR', counter: iv, length: 64 },
+                keyObject,
+                value
+            );
+
+            decryptedData.push(new Uint8Array(decryptedBuffer));
+            totalDecryptedSize += decryptedBuffer.byteLength;
+        }
+
+        const decryptedBlob = new Blob(decryptedData, { type: 'video/mp4' });
+
+        // Initialize video element after decryption is completed
+        const videoElement = document.getElementById('decryptedVideo');
+        videoElement.src = URL.createObjectURL(decryptedBlob);
+
+        console.log(`Decryption completed. Total decrypted size: ${totalDecryptedSize} bytes.`);
+    }
+
+    decryptVideo();
+</script>
+</body>
+</html>
