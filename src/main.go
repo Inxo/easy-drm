@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-var key = []byte("12312312312312313212312312312312") // Замените на свой секретный ключ
+var key = []byte("") // Замените на свой секретный ключ
 
 func main() {
 	wd, err := os.Getwd()
@@ -27,6 +27,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	hostsStr := os.Getenv("CORS_HOSTS")
+	key = []byte(os.Getenv("SECRET"))
 	hosts := strings.Split(hostsStr, ",")
 	crs := cors.New(cors.Options{
 		AllowedOrigins:   hosts,
@@ -46,6 +47,9 @@ func main() {
 }
 
 func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
+	keyUrl := r.URL.Query().Get("key")
+	fmt.Println("key: " + keyUrl)
+	key = []byte(keyUrl)
 	videoFile, err := os.Open("input.mp4") // Замените на путь к вашему исходному видеофайлу
 	if err != nil {
 		http.Error(w, "Unable to open video file", http.StatusInternalServerError)
