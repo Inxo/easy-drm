@@ -8,8 +8,8 @@
 <body>
 <video id="decryptedVideo" controls></video>
 <script>
-    const key = "12312312312312313212312312312312"; // Replace with your actual key
-    const sourceUrl = 'http://stream.inxo.ru:8080/stream'; // Replace with your server URL
+    const key = "12312312312312313212312312312313"; // Replace with your actual key
+    const sourceUrl = 'http://stream.inxo.ru/stream'; // Replace with your server URL
 
     async function decryptVideo() {
         const response = await fetch(sourceUrl+"?key="+key);
