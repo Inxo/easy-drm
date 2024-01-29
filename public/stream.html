@@ -8,11 +8,13 @@
 <body>
 <video id="decryptedVideo" controls></video>
 <script>
-    const key = "12312312312312313212312312312313"; // Replace with your actual key
-    const sourceUrl = 'https://stream.inxo.ru/stream'; // Replace with your server URL
+    const key = "mysecretkey12345"; // Replace with your actual key
+    const sourceUrl = 'http://localhost/stream?key='+key; // Replace with your server URL
+
     async function decryptVideo() {
-        const response = await fetch(sourceUrl+"?key="+key);
-        const reader = response.body.getReader();
+        const response = await fetch(sourceUrl);
+        const readableStream = response.body;
+        const reader = readableStream.getReader();
 
         const keyBuffer = new TextEncoder().encode(key);
         const iv = new Uint8Array(16); // Initialization vector
@@ -21,11 +23,11 @@
             'raw',
             keyBuffer,
             { name: 'AES-CTR', length: 128 },
-            true,
-            ["decrypt", "encrypt"]
+            false,
+            ['decrypt']
         );
 
-        let decryptedData = [];
+        const chunks = [];
         let totalDecryptedSize = 0;
 
         while (true) {
@@ -33,18 +35,29 @@
             if (done) break;
 
             const decryptedBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-CTR', counter: iv, length: 128 },
+                { name: 'AES-CTR', counter: iv, length: 64 },
                 keyObject,
                 value
             );
 
-            decryptedData.push(new Uint8Array(decryptedBuffer));
-            totalDecryptedSize += decryptedBuffer.byteLength;
+            const decryptedChunk = new Uint8Array(decryptedBuffer);
+            totalDecryptedSize += decryptedChunk.byteLength;
+            chunks.push(decryptedChunk);
         }
 
-        const decryptedBlob = new Blob(decryptedData, { type: 'video/mp4' });
+        const concatenatedData = new Uint8Array(totalDecryptedSize);
+        let offset = 0;
 
-        // Initialize video element after decryption is completed
+        // Concatenate chunks into a single Uint8Array
+        for (const chunk of chunks) {
+            concatenatedData.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        // Create a Blob from the concatenated data
+        const decryptedBlob = new Blob([concatenatedData], { type: 'video/mp4' });
+
+        // Set the Blob as the source of the video
         const videoElement = document.getElementById('decryptedVideo');
         videoElement.src = URL.createObjectURL(decryptedBlob);
 
