@@ -33,7 +33,7 @@
             if (done) break;
 
             const decryptedBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-CTR', counter: iv, length: 64 },
+                { name: 'AES-CTR', counter: iv, length: 1024*10 },
                 keyObject,
                 value
             );
