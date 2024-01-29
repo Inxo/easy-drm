@@ -1,0 +1,9 @@
+/app/logs/app.log
+{
+    missingok
+    daily
+    copytruncate
+    rotate 7
+    notifempty
+    su root root
+}

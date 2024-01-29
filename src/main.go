@@ -50,7 +50,7 @@ func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
 	keyUrl := r.URL.Query().Get("key")
 	fmt.Println("key: " + keyUrl)
 	key = []byte(keyUrl)
-	videoFile, err := os.Open("input.mp4") // Замените на путь к вашему исходному видеофайлу
+	videoFile, err := os.Open("../data/input.mp4") // Замените на путь к вашему исходному видеофайлу
 	if err != nil {
 		http.Error(w, "Unable to open video file", http.StatusInternalServerError)
 		return
