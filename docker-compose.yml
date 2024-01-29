@@ -1,0 +1,33 @@
+version: '3'
+services:
+  # App
+  nulljet-stream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nulljet-stream
+    restart: unless-stopped
+    volumes:
+      - ./.env:/app/.env
+      - ./logs/:/app/logs/
+      - ./data/:/app/data/
+    networks:
+     - nulljet-app-network
+
+  # Nginx Service
+  webserver:
+    image: nginx:alpine
+    container_name: nulljet-stream-webserver
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/nginx/conf.d/:/etc/nginx/conf.d/
+    networks:
+      - nulljet-app-network
+
+#Docker Networks
+networks:
+  nulljet-app-network:
+    driver: bridge
