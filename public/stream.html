@@ -9,7 +9,7 @@
 <video id="decryptedVideo" controls></video>
 <script>
     const key = "mysecretkey12345"; // Replace with your actual key
-    const sourceUrl = 'http://localhost/stream?key='+key; // Replace with your server URL
+    const sourceUrl = '/stream?key='+key; // Replace with your server URL
 
     async function decryptVideo() {
         const response = await fetch(sourceUrl);
