@@ -32,9 +32,6 @@
             return null;
         }
     }
-    function arrayBufferToHex(buffer) {
-        return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
-    }
     fetch('encrypted_output.mp4')
         .then(response => response.arrayBuffer())
         .then(async encryptedArrayBuffer => {
@@ -42,14 +39,12 @@
             const decryptedArrayBuffer = await decryptMP4(new Uint8Array(encryptedArrayBuffer), decryptionKey);
 
             if (decryptedArrayBuffer) {
-                const decryptedHex = arrayBufferToHex(decryptedArrayBuffer);
                 const decryptedBlob = new Blob([decryptedArrayBuffer], { type: 'video/mp4' });
                 const decryptedUrl = URL.createObjectURL(decryptedBlob);
                 const video = document.createElement('video');
                 video.src = decryptedUrl;
                 video.controls = true;
                 document.body.appendChild(video);
-                // console.log('Decrypted MP4 data:', decryptedHex);
             } else {
                 console.error('Decryption failed.');
             }
