@@ -14,9 +14,11 @@ import (
 )
 
 var key = []byte("") // Замените на свой секретный ключ
+var wd = ""
 
 func main() {
-	wd, err := os.Getwd()
+	var err error
+	wd, err = os.Getwd()
 	if err != nil {
 		log.Fatal("Cannot get working directory")
 	}
@@ -49,8 +51,10 @@ func main() {
 func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
 	keyUrl := r.URL.Query().Get("key")
 	fmt.Println("key: " + keyUrl)
+
+	fmt.Println("wd: " + wd)
 	key = []byte(keyUrl)
-	videoFile, err := os.Open("../data/input.mp4") // Замените на путь к вашему исходному видеофайлу
+	videoFile, err := os.Open(wd + "/data/input.mp4") // Замените на путь к вашему исходному видеофайлу
 	if err != nil {
 		http.Error(w, "Unable to open video file", http.StatusInternalServerError)
 		return
