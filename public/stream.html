@@ -35,7 +35,7 @@
             if (done) break;
 
             const decryptedBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-CTR', counter: iv, length: 128 },
+                { name: 'AES-CTR', counter: iv, length: 64 },
                 keyObject,
                 value
             );
@@ -61,7 +61,7 @@
         const videoElement = document.getElementById('decryptedVideo');
         setTimeout(function () {
             videoElement.src = URL.createObjectURL(decryptedBlob);
-        }, 10000)
+        }, 100)
 
         console.log(`Decryption completed. Total decrypted size: ${totalDecryptedSize} bytes.`);
     }
