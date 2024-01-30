@@ -77,7 +77,7 @@ func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
 	stream := cipher.NewCTR(block, make([]byte, aes.BlockSize))
 	writer := &cipher.StreamWriter{S: stream, W: w}
 
-	buf := make([]byte, 7*1024*1024)
+	buf := make([]byte, 1024*1024)
 	for {
 		n, err := videoFile.Read(buf)
 		if err == io.EOF {
