@@ -6,10 +6,9 @@
     <title>Decrypted Video Stream</title>
 </head>
 <body>
-<video id="decryptedVideo" controls></video>
 <script>
     const key = "mysecretkey12345mysecretkey12345"; // Replace with your actual key
-    const sourceUrl = 'https://stream.inxo.ru/stream?key='+key; // Replace with your server URL
+    const sourceUrl = 'http://localhost:8080/stream?key='+key; // Replace with your server URL
 
     async function decryptVideo() {
         const response = await fetch(sourceUrl);
@@ -58,9 +57,11 @@
         const decryptedBlob = new Blob([concatenatedData], { type: 'video/mp4' });
 
         // Set the Blob as the source of the video
-        const videoElement = document.getElementById('decryptedVideo');
+        const video = document.createElement('video');
         setTimeout(function () {
-            videoElement.src = URL.createObjectURL(decryptedBlob);
+            video.src = URL.createObjectURL(decryptedBlob);
+            video.controls = false
+            document.body.appendChild(video);
         }, 100)
 
         console.log(`Decryption completed. Total decrypted size: ${totalDecryptedSize} bytes.`);
