@@ -8,8 +8,8 @@
 <body>
 <video id="decryptedVideo" controls></video>
 <script>
-    const key = "mysecretkey12345"; // Replace with your actual key
-    const sourceUrl = '/stream?key='+key; // Replace with your server URL
+    const key = "mysecretkey12345mysecretkey12345"; // Replace with your actual key
+    const sourceUrl = 'http://localhost:8080/stream?key='+key; // Replace with your server URL
 
     async function decryptVideo() {
         const response = await fetch(sourceUrl);
@@ -35,7 +35,7 @@
             if (done) break;
 
             const decryptedBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-CTR', counter: iv, length: 64 },
+                { name: 'AES-CTR', counter: iv, length: 128 },
                 keyObject,
                 value
             );

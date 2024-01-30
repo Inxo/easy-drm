@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-var key = []byte("") // Замените на свой секретный ключ
+var key = []byte("mysecretkey12345mysecretkey12345") // Замените на свой секретный ключ
 var wd = ""
 
 func main() {
@@ -61,7 +61,7 @@ func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
 	defer func(videoFile *os.File) {
 		err := videoFile.Close()
 		if err != nil {
-
+			fmt.Println(err.Error())
 		}
 	}(videoFile)
 
@@ -77,7 +77,7 @@ func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
 	stream := cipher.NewCTR(block, make([]byte, aes.BlockSize))
 	writer := &cipher.StreamWriter{S: stream, W: w}
 
-	buf := make([]byte, 64)
+	buf := make([]byte, 7*1024*1024)
 	for {
 		n, err := videoFile.Read(buf)
 		if err == io.EOF {
