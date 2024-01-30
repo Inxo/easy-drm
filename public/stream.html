@@ -59,7 +59,9 @@
 
         // Set the Blob as the source of the video
         const videoElement = document.getElementById('decryptedVideo');
-        videoElement.src = URL.createObjectURL(decryptedBlob);
+        setTimeout(function () {
+            videoElement.src = URL.createObjectURL(decryptedBlob);
+        }, 10000)
 
         console.log(`Decryption completed. Total decrypted size: ${totalDecryptedSize} bytes.`);
     }
