@@ -8,7 +8,7 @@
 <body>
 <script>
     const key = "mysecretkey12345mysecretkey12345"; // Replace with your actual key
-    const sourceUrl = 'http://localhost:8080/stream?key='+key; // Replace with your server URL
+    const sourceUrl = '/stream?key='+key; // Replace with your server URL
 
     async function decryptVideo() {
         const response = await fetch(sourceUrl);
