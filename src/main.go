@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 )
 
 var key = []byte("") // Замените на свой секретный ключ
@@ -28,17 +27,17 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	hostsStr := os.Getenv("CORS_HOSTS")
 	key = []byte(os.Getenv("SECRET"))
-	hosts := strings.Split(hostsStr, ",")
-	crs := cors.New(cors.Options{
-		AllowedOrigins:   hosts,
-		AllowCredentials: false,
-		AllowedHeaders:   []string{"Authorization", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-Site", "Content-Type", "Origin", "Accept", "Access-Control-Allow-Credentials"},
-		// Enable Debugging for testing, consider disabling in production
-		Debug: true,
-	})
-	handler := crs.Handler(mux)
+	//hostsStr := os.Getenv("CORS_HOSTS")
+	//hosts := strings.Split(hostsStr, ",")
+	//crs := cors.New(cors.Options{
+	//	AllowedOrigins:   hosts,
+	//	AllowCredentials: false,
+	//	AllowedHeaders:   []string{"Authorization", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-Site", "Content-Type", "Origin", "Accept", "Access-Control-Allow-Credentials"},
+	//	// Enable Debugging for testing, consider disabling in production
+	//	Debug: true,
+	//})
+	handler := cors.Default().Handler(mux)
 	mux.HandleFunc("/stream", videoStreamHandler)
 	srv := &http.Server{Addr: ":8080", Handler: handler}
 	println("starting web: http://localhost:" + srv.Addr)
