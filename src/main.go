@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -53,7 +52,7 @@ func main() {
 		}
 		defer file.Close()
 
-		videoData, err := ioutil.ReadAll(file)
+		videoData, err := io.ReadAll(file)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
