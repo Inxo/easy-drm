@@ -4,8 +4,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 )
@@ -33,10 +35,18 @@ func encrypt(data []byte, key []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
+var wd = ""
+
 func main() {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatal("Cannot get working directory")
+	}
+	fmt.Println("wd: " + wd)
 	http.HandleFunc("/video", func(w http.ResponseWriter, r *http.Request) {
+
 		// Чтение mp4-файла
-		file, err := os.Open("input.mp4")
+		file, err := os.Open(wd + "/data/input.mp4")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
