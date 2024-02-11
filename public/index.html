@@ -9,10 +9,11 @@
 <script>
     async function decryptAndPlayVideo() {
         try {
-            const response = await fetch('http://localhost:8080/video');
+            const k = "your_secret_aes_key_32_charslong";
+            const response = await fetch('http://localhost:8080/video?key='+k);
             const encryptedData = await response.arrayBuffer();
 
-            const key = new TextEncoder().encode("your_secret_aes_key_32_charslong");
+            const key = new TextEncoder().encode(k);
             const iv = new Uint8Array(16); // Создаем пустой вектор инициализации
 
             // Создаем блочный шифр

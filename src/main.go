@@ -3,15 +3,17 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 )
 
-var aesKey = []byte("your_secret_aes_key_32_charslong")
+var aesKey = []byte("")
 
 func main() {
 	http.HandleFunc("/video", func(w http.ResponseWriter, r *http.Request) {
+		aesKey = []byte(r.URL.Query().Get("key"))
 		// Открытие файла
 		file, err := os.Open("input.mp4")
 		if err != nil {
@@ -38,7 +40,8 @@ func main() {
 		writer := &cipher.StreamWriter{S: stream, W: w}
 
 		// Чтение данных файла по блокам, их шифрование и запись в ответ
-		buffer := make([]byte, 8192) // Буфер размером 8KB
+		buffer := make([]byte, 1024*1024) // Буфер размером 8KB
+		fmt.Println("handle: " + string(aesKey))
 		for {
 			n, err := file.Read(buffer)
 			if err == io.EOF {
