@@ -3,97 +3,74 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"fmt"
-	"github.com/joho/godotenv"
-	"github.com/rs/cors"
+	"crypto/rand"
 	"io"
-	"log"
+	"io/ioutil"
 	"net/http"
 	"os"
 )
 
-var key = []byte("mysecretkey12345mysecretkey12345") // Замените на свой секретный ключ
-var wd = ""
+var aesKey = []byte("your_secret_aes_key_32_charslong")
 
-func main() {
-	var err error
-	wd, err = os.Getwd()
-	if err != nil {
-		log.Fatal("Cannot get working directory")
-	}
-	err = godotenv.Load(wd + "/.env")
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	mux := http.NewServeMux()
-	key = []byte(os.Getenv("SECRET"))
-	//hostsStr := os.Getenv("CORS_HOSTS")
-	//hosts := strings.Split(hostsStr, ",")
-	//crs := cors.New(cors.Options{
-	//	AllowedOrigins:   hosts,
-	//	AllowCredentials: false,
-	//	AllowedHeaders:   []string{"Authorization", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-Site", "Content-Type", "Origin", "Accept", "Access-Control-Allow-Credentials"},
-	//	// Enable Debugging for testing, consider disabling in production
-	//	Debug: true,
-	//})
-	handler := cors.Default().Handler(mux)
-	mux.HandleFunc("/stream", videoStreamHandler)
-	srv := &http.Server{Addr: ":8080", Handler: handler}
-	println("starting web: http://localhost:" + srv.Addr)
-	err = srv.ListenAndServe()
-	if err != nil {
-		println("server not started: " + err.Error())
-	}
-}
-
-func videoStreamHandler(w http.ResponseWriter, r *http.Request) {
-	keyUrl := r.URL.Query().Get("key")
-	fmt.Println("key: " + keyUrl)
-
-	fmt.Println("wd: " + wd)
-	key = []byte(keyUrl)
-	videoFile, err := os.Open(wd + "/data/input.mp4") // Замените на путь к вашему исходному видеофайлу
-	if err != nil {
-		http.Error(w, "Unable to open video file", http.StatusInternalServerError)
-		return
-	}
-	defer func(videoFile *os.File) {
-		err := videoFile.Close()
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-	}(videoFile)
-
-	w.Header().Set("Content-Type", "video/mp4")
-	w.Header().Set("Transfer-Encoding", "chunked")
-
+func encrypt(data []byte, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		http.Error(w, "Error creating AES cipher", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
-	stream := cipher.NewCTR(block, make([]byte, aes.BlockSize))
-	writer := &cipher.StreamWriter{S: stream, W: w}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
 
-	buf := make([]byte, 1024*1024)
-	for {
-		n, err := videoFile.Read(buf)
-		if err == io.EOF {
-			break
-		}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+
+	ciphertext := gcm.Seal(nil, nonce, data, nil)
+	ciphertext = append(nonce, ciphertext...)
+	return ciphertext, nil
+}
+
+func main() {
+	http.HandleFunc("/video", func(w http.ResponseWriter, r *http.Request) {
+		// Чтение mp4-файла
+		file, err := os.Open("input.mp4")
 		if err != nil {
-			http.Error(w, "Error reading video file", http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		videoData, err := ioutil.ReadAll(file)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		_, err = writer.Write(buf[:n])
+		encryptedData, err := encrypt(videoData, aesKey)
 		if err != nil {
-			http.Error(w, "Error writing encrypted data to response", http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(encryptedData)
+	})
+
+	// Middleware для обработки CORS
+	corsMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			if r.Method == "OPTIONS" {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
 	}
 
-	fmt.Println("Video streaming completed.")
+	http.ListenAndServe(":8080", corsMiddleware(http.DefaultServeMux))
 }

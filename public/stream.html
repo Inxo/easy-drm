@@ -1,73 +1,50 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Decrypted Video Stream</title>
+    <title>Расшифровка видео</title>
 </head>
 <body>
+<video id="video" controls></video>
+
 <script>
-    const key = "mysecretkey12345mysecretkey12345"; // Replace with your actual key
-    const sourceUrl = '/stream?key='+key; // Replace with your server URL
-
-    async function decryptVideo() {
-        const response = await fetch(sourceUrl);
-        const readableStream = response.body;
-        const reader = readableStream.getReader();
-
-        const keyBuffer = new TextEncoder().encode(key);
-        const iv = new Uint8Array(16); // Initialization vector
-
-        const keyObject = await crypto.subtle.importKey(
-            'raw',
-            keyBuffer,
-            { name: 'AES-CTR', length: 128 },
-            false,
-            ['decrypt']
-        );
-
-        const chunks = [];
-        let totalDecryptedSize = 0;
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const decryptedBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-CTR', counter: iv, length: 128 },
-                keyObject,
-                value
-            );
-
-            const decryptedChunk = new Uint8Array(decryptedBuffer);
-            totalDecryptedSize += decryptedChunk.byteLength;
-            chunks.push(decryptedChunk);
-        }
-
-        const concatenatedData = new Uint8Array(totalDecryptedSize);
-        let offset = 0;
-
-        // Concatenate chunks into a single Uint8Array
-        for (const chunk of chunks) {
-            concatenatedData.set(chunk, offset);
-            offset += chunk.length;
-        }
-
-        // Create a Blob from the concatenated data
-        const decryptedBlob = new Blob([concatenatedData], { type: 'video/mp4' });
-
-        // Set the Blob as the source of the video
-        const video = document.createElement('video');
-        setTimeout(function () {
-            video.src = URL.createObjectURL(decryptedBlob);
-            video.controls = false
-            document.body.appendChild(video);
-        }, 100)
-
-        console.log(`Decryption completed. Total decrypted size: ${totalDecryptedSize} bytes.`);
+    function stringToUint8Array(str) {
+        const encoder = new TextEncoder();
+        return encoder.encode(str);
     }
 
-    decryptVideo();
+    async function decryptVideo() {
+        const response = await fetch('http://localhost:8080/video');
+        const encryptedArrayBuffer = await response.arrayBuffer();
+        const keyUint8Array = stringToUint8Array("your_secret_aes_key_32_charslong");
+        const key = await crypto.subtle.importKey(
+            'raw',
+            keyUint8Array,
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt', 'decrypt']
+        );
+        const decryptedData = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(encryptedArrayBuffer.slice(0, 12)) },
+            key,
+            new Uint8Array(encryptedArrayBuffer.slice(12))
+        );
+        return decryptedData;
+    }
+
+    async function loadAndDecryptVideo() {
+        try {
+            const decryptedData = await decryptVideo();
+            const videoBlob = new Blob([decryptedData], { type: 'video/mp4' });
+            const videoUrl = URL.createObjectURL(videoBlob);
+            const video = document.getElementById('video');
+            video.src = videoUrl;
+        } catch (error) {
+            console.error('Ошибка:', error);
+            alert('Не удалось расшифровать и загрузить видео.');
+        }
+    }
+
+    loadAndDecryptVideo();
 </script>
 </body>
 </html>
