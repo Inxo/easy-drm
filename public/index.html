@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <title>Расшифровка видео</title>
 </head>
@@ -7,35 +7,41 @@
 <video id="video" controls></video>
 
 <script>
-    function stringToUint8Array(str) {
-        const encoder = new TextEncoder();
-        return encoder.encode(str);
-    }
-
-    async function decryptVideo() {
-        const response = await fetch('https://stream.inxo.ru/video');
-        const encryptedArrayBuffer = await response.arrayBuffer();
-        const keyUint8Array = stringToUint8Array("your_secret_aes_key_32_charslong");
-        const key = await crypto.subtle.importKey(
-            'raw',
-            keyUint8Array,
-            { name: 'AES-GCM' },
-            false,
-            ['encrypt', 'decrypt']
-        );
-        const decryptedData = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv: new Uint8Array(encryptedArrayBuffer.slice(0, 12)) },
-            key,
-            new Uint8Array(encryptedArrayBuffer.slice(12))
-        );
-        return decryptedData;
-    }
-
-    async function loadAndDecryptVideo() {
+    async function decryptAndPlayVideo() {
         try {
-            const decryptedData = await decryptVideo();
-            const videoBlob = new Blob([decryptedData], { type: 'video/mp4' });
-            const videoUrl = URL.createObjectURL(videoBlob);
+            const response = await fetch('http://localhost:8080/video');
+            const encryptedData = await response.arrayBuffer();
+
+            const key = new TextEncoder().encode("your_secret_aes_key_32_charslong");
+            const iv = new Uint8Array(16); // Создаем пустой вектор инициализации
+
+            // Создаем блочный шифр
+            const cipher = await window.crypto.subtle.importKey(
+                'raw',
+                key,
+                {name: 'AES-CTR'},
+                false,
+                ['encrypt', 'decrypt']
+            );
+
+            // Расшифровываем данные
+            const decryptedData = await window.crypto.subtle.decrypt(
+                {
+                    name: "AES-CTR",
+                    counter: iv,
+                    length: 128
+                },
+                cipher,
+                encryptedData
+            );
+
+            // Преобразуем расшифрованные данные в Blob
+            const decryptedBlob = new Blob([decryptedData], {type: 'video/mp4'});
+
+            // Создаем URL для видео
+            const videoUrl = URL.createObjectURL(decryptedBlob);
+
+            // Устанавливаем URL для видео элемента
             const video = document.getElementById('video');
             video.src = videoUrl;
         } catch (error) {
@@ -44,7 +50,7 @@
         }
     }
 
-    loadAndDecryptVideo();
+    decryptAndPlayVideo();
 </script>
 </body>
 </html>
