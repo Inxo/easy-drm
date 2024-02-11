@@ -1,55 +1,50 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Decrypt and Play MP4 Stream</title>
+    <title>Расшифровка видео</title>
 </head>
 <body>
+<video id="video" controls></video>
+
 <script>
-    async function decryptMP4(encryptedData, key) {
-        if (key.length !== 32) {
-            console.error('Invalid key length. Expected 32 bytes (256 bits).');
-            return null;
-        }
-        const iv = encryptedData.slice(0, 16);
-        const encryptedContent = encryptedData.slice(16);
+    function stringToUint8Array(str) {
+        const encoder = new TextEncoder();
+        return encoder.encode(str);
+    }
+
+    async function decryptVideo() {
+        const response = await fetch('https://stream.inxo.ru/video');
+        const encryptedArrayBuffer = await response.arrayBuffer();
+        const keyUint8Array = stringToUint8Array("your_secret_aes_key_32_charslong");
+        const key = await crypto.subtle.importKey(
+            'raw',
+            keyUint8Array,
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt', 'decrypt']
+        );
+        const decryptedData = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(encryptedArrayBuffer.slice(0, 12)) },
+            key,
+            new Uint8Array(encryptedArrayBuffer.slice(12))
+        );
+        return decryptedData;
+    }
+
+    async function loadAndDecryptVideo() {
         try {
-            const importedKey = await crypto.subtle.importKey(
-                'raw',
-                key,
-                { name: 'AES-CBC' },
-                true,
-                ["decrypt", "encrypt"]
-            );
-            return await crypto.subtle.decrypt(
-                {name: 'AES-CBC', iv: iv},
-                importedKey,
-                new Uint8Array(encryptedContent)
-            );
+            const decryptedData = await decryptVideo();
+            const videoBlob = new Blob([decryptedData], { type: 'video/mp4' });
+            const videoUrl = URL.createObjectURL(videoBlob);
+            const video = document.getElementById('video');
+            video.src = videoUrl;
         } catch (error) {
-            console.error('Error during decryption:', error);
-            return null;
+            console.error('Ошибка:', error);
+            alert('Не удалось расшифровать и загрузить видео.');
         }
     }
-    fetch('encrypted_output.mp4')
-        .then(response => response.arrayBuffer())
-        .then(async encryptedArrayBuffer => {
-            const decryptionKey = new TextEncoder().encode('12312312312312313212312312312312');
-            const decryptedArrayBuffer = await decryptMP4(new Uint8Array(encryptedArrayBuffer), decryptionKey);
 
-            if (decryptedArrayBuffer) {
-                const decryptedBlob = new Blob([decryptedArrayBuffer], { type: 'video/mp4' });
-                const decryptedUrl = URL.createObjectURL(decryptedBlob);
-                const video = document.createElement('video');
-                video.src = decryptedUrl;
-                video.controls = true;
-                document.body.appendChild(video);
-            } else {
-                console.error('Decryption failed.');
-            }
-        })
-        .catch(error => console.error('Error loading or decrypting MP4 data:', error));
+    loadAndDecryptVideo();
 </script>
 </body>
 </html>

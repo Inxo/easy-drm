@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decrypt and Play MP4 Stream</title>
+</head>
+<body>
+<script>
+    async function decryptMP4(encryptedData, key) {
+        if (key.length !== 32) {
+            console.error('Invalid key length. Expected 32 bytes (256 bits).');
+            return null;
+        }
+        const iv = encryptedData.slice(0, 16);
+        const encryptedContent = encryptedData.slice(16);
+        try {
+            const importedKey = await crypto.subtle.importKey(
+                'raw',
+                key,
+                { name: 'AES-CBC' },
+                true,
+                ["decrypt", "encrypt"]
+            );
+            return await crypto.subtle.decrypt(
+                {name: 'AES-CBC', iv: iv},
+                importedKey,
+                new Uint8Array(encryptedContent)
+            );
+        } catch (error) {
+            console.error('Error during decryption:', error);
+            return null;
+        }
+    }
+    fetch('encrypted_output.mp4')
+        .then(response => response.arrayBuffer())
+        .then(async encryptedArrayBuffer => {
+            const decryptionKey = new TextEncoder().encode('12312312312312313212312312312312');
+            const decryptedArrayBuffer = await decryptMP4(new Uint8Array(encryptedArrayBuffer), decryptionKey);
+
+            if (decryptedArrayBuffer) {
+                const decryptedBlob = new Blob([decryptedArrayBuffer], { type: 'video/mp4' });
+                const decryptedUrl = URL.createObjectURL(decryptedBlob);
+                const video = document.createElement('video');
+                video.src = decryptedUrl;
+                video.controls = true;
+                document.body.appendChild(video);
+            } else {
+                console.error('Decryption failed.');
+            }
+        })
+        .catch(error => console.error('Error loading or decrypting MP4 data:', error));
+</script>
+</body>
+</html>
