@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Расшифровка видео CTR</title>
+</head>
+<body>
+<script>
+    const key = "mysecretkey12345mysecretkey12345"; // Replace with your actual key
+    const sourceUrl = 'http://localhost:8080/video?key='+key; // Replace with your server URL
+
+    async function decryptVideo() {
+        const response = await fetch(sourceUrl);
+        const readableStream = response.body;
+        const reader = readableStream.getReader();
+
+        const keyBuffer = new TextEncoder().encode(key);
+        const iv = new Uint8Array(16); // Initialization vector
+
+        const keyObject = await crypto.subtle.importKey(
+            'raw',
+            keyBuffer,
+            { name: 'AES-CTR', length: 128 },
+            false,
+            ['decrypt']
+        );
+
+        const chunks = [];
+        let totalDecryptedSize = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const decryptedBuffer = await crypto.subtle.decrypt(
+                { name: 'AES-CTR', counter: iv, length: 32 },
+                keyObject,
+                value
+            );
+
+            const decryptedChunk = new Uint8Array(decryptedBuffer);
+            totalDecryptedSize += decryptedChunk.byteLength;
+            console.log(totalDecryptedSize)
+            chunks.push(decryptedChunk);
+        }
+
+        const concatenatedData = new Uint8Array(totalDecryptedSize);
+        let offset = 0;
+
+        let i = 0;
+        console.log(chunks.length)
+        // Concatenate chunks into a single Uint8Array
+        for (const chunk of chunks) {
+            concatenatedData.set(chunk, offset);
+            offset += chunk.length;
+            if(i > 18){
+                break
+            }
+            i++;
+        }
+
+        // Create a Blob from the concatenated data
+        const decryptedBlob = new Blob([concatenatedData], { type: 'video/mp4' });
+
+        // Set the Blob as the source of the video
+        const video = document.createElement('video');
+        setTimeout(function () {
+            video.src = URL.createObjectURL(decryptedBlob);
+            video.controls = true
+            document.body.appendChild(video);
+        }, 100)
+
+        console.log(`Decryption completed. Total decrypted size: ${totalDecryptedSize} bytes.`);
+    }
+
+    decryptVideo();
+</script>
+</body>
+</html>
