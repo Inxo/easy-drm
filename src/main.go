@@ -81,5 +81,8 @@ func main() {
 		})
 	}
 
-	http.ListenAndServe(":8080", corsMiddleware(http.DefaultServeMux))
+	err = http.ListenAndServe(":8080", corsMiddleware(http.DefaultServeMux))
+	if err != nil {
+		return
+	}
 }
