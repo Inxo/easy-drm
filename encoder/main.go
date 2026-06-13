@@ -1,117 +1,100 @@
 package main
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 )
 
-// generateKey генерирует случайный ключ заданной длины
-func generateKey(keyLength int) ([]byte, error) {
-	key := make([]byte, keyLength)
-	_, err := rand.Read(key)
-	if err != nil {
-		return nil, err
-	}
-	return key, nil
-}
+// EDRM format:
+//   [4]  magic "EDRM"
+//   [4]  version = 1  (uint32 LE)
+//   [4]  chunk count  (uint32 LE)
+//   [4]  plain chunk size in bytes (uint32 LE)
+//   per chunk:
+//     [12] GCM nonce
+//     [4]  encrypted length (uint32 LE)
+//     [N]  AES-GCM ciphertext  (plain + 16-byte tag)
 
-// encrypt используется для шифрования данных с использованием AES
-// encrypt используется для шифрования данных с использованием AES
-func encrypt(data []byte, key []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-
-	// Генерация IV (вектор инициализации)
-	iv := make([]byte, aes.BlockSize)
-	if _, err := rand.Read(iv); err != nil {
-		return nil, err
-	}
-
-	// Создание шифровщика с использованием блочного режима CBC
-	mode := cipher.NewCBCEncrypter(block, iv)
-
-	// Дополнение данных до размера блока
-	padLen := aes.BlockSize - (len(data) % aes.BlockSize)
-	pad := bytes.Repeat([]byte{byte(padLen)}, padLen)
-	data = append(data, pad...)
-
-	// Добавление IV к зашифрованным данным
-	encrypted := make([]byte, len(data)+aes.BlockSize)
-	copy(encrypted[:aes.BlockSize], iv)
-
-	// Шифрование данных
-	mode.CryptBlocks(encrypted[aes.BlockSize:], data)
-
-	return encrypted, nil
-}
-
-// writeToFile записывает данные в файл
-func writeToFile(data []byte, filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer func(file *os.File) {
-		_ = file.Close()
-	}(file)
-
-	_, err = file.Write(data)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Шифрование завершено. Зашифрованные данные сохранены в %s\n", filename)
-	return nil
-}
+const plainChunkSize = 512 * 1024 // 512 KB
 
 func main() {
-
-	if len(os.Args) < 3 {
-		fmt.Println("Ошибка параметров: input key output")
-		return
-	}
-	// Загрузка видео из файла MP4
-	inputFilename := os.Args[1]
-	videoData, err := os.ReadFile(inputFilename)
-	if err != nil {
-		fmt.Println("Ошибка при чтении файла:", err)
-		return
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "Usage: encoder <input.mp4> <output.enc> <hex_aes256_key>")
+		fmt.Fprintln(os.Stderr, "  Generate key: openssl rand -hex 32")
+		os.Exit(1)
 	}
 
-	// Генерация случайного ключа для шифрования
-	keyLength := 32 // 256 бит для AES-256
-	key, err := generateKey(keyLength)
-	if err != nil {
-		fmt.Println("Ошибка при генерации ключа:", err)
-		return
-	}
-	keyArgs := os.Args[2]
-	if len(os.Args) > 2 {
-		key = []byte(keyArgs)
-	}
-	fmt.Println("Key: " + string(key))
+	inputPath := os.Args[1]
+	outputPath := os.Args[2]
+	keyHex := os.Args[3]
 
-	// Шифрование видео
-	encryptedVideo, err := encrypt(videoData, key)
-	if err != nil {
-		fmt.Println("Ошибка при шифровании видео:", err)
-		return
+	key, err := hex.DecodeString(keyHex)
+	if err != nil || len(key) != 32 {
+		fmt.Fprintln(os.Stderr, "Key must be 64 hex chars (32 bytes / AES-256)")
+		os.Exit(1)
 	}
 
-	// Сохранение зашифрованного видео в файл
-	outputFilename := "encrypted_output.mp4"
-	if len(os.Args) > 3 {
-		outputFilename = os.Args[3]
-	}
-	err = writeToFile(encryptedVideo, outputFilename)
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		fmt.Println("Ошибка при сохранении файла:", err)
-		return
+		fmt.Fprintln(os.Stderr, "Failed to create cipher:", err)
+		os.Exit(1)
 	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to create GCM:", err)
+		os.Exit(1)
+	}
+
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to read input:", err)
+		os.Exit(1)
+	}
+
+	chunkCount := (len(data) + plainChunkSize - 1) / plainChunkSize
+
+	out, err := os.Create(outputPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to create output:", err)
+		os.Exit(1)
+	}
+	defer out.Close()
+
+	// Write header
+	out.Write([]byte("EDRM"))
+	binary.Write(out, binary.LittleEndian, uint32(1))
+	binary.Write(out, binary.LittleEndian, uint32(chunkCount))
+	binary.Write(out, binary.LittleEndian, uint32(plainChunkSize))
+
+	nonce := make([]byte, gcm.NonceSize()) // 12 bytes
+
+	for i := 0; i < chunkCount; i++ {
+		start := i * plainChunkSize
+		end := start + plainChunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[start:end]
+
+		if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to generate nonce:", err)
+			os.Exit(1)
+		}
+
+		enc := gcm.Seal(nil, nonce, chunk, nil)
+
+		out.Write(nonce)
+		binary.Write(out, binary.LittleEndian, uint32(len(enc)))
+		out.Write(enc)
+
+		fmt.Printf("chunk %d/%d  (%d bytes)\n", i+1, chunkCount, len(enc))
+	}
+
+	fmt.Printf("\nDone: %s → %s  (%d chunks)\n", inputPath, outputPath, chunkCount)
 }
