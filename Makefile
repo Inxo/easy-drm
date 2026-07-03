@@ -18,9 +18,9 @@ build:
 	@echo "Building $(BINARY_NAME)..."
 	@go build -o build/$(BINARY_NAME) -ldflags="-s -w" ./src/$(GO_FILES)
 
-build-encode:
-	@echo "Building encoder..."
-	@go build -o build/encoder -ldflags="-s -w" ./encoder/$(GO_FILES)
+build-packager:
+	@echo "Building packager..."
+	@go build -o build/packager -ldflags="-s -w" ./encoder/$(GO_FILES)
 
 
 test:

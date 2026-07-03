@@ -1,13 +1,22 @@
 package main
 
+// DRM-сервер на базе EME Clear Key (org.w3.clearkey).
+//
+// Видео один раз шифруется в MPEG-CENC утилитой packager (обёртка над ffmpeg,
+// без перекодирования) и лежит на диске как data/video.mp4. Сервер отдаёт его
+// как обычную статику с поддержкой Range (перемотка работает из коробки),
+// а ключ выдаёт через мини-«лицензионный сервер» /license по подписанному токену.
+// Дешифровка происходит внутри медиастека браузера — расшифрованные байты
+// не проходят через JS страницы.
+
 import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,28 +25,29 @@ import (
 	"time"
 )
 
-// EDRM chunk format (produced by encoder):
-//   header 16 bytes: "EDRM" + version(4) + chunkCount(4) + plainChunkSize(4)
-//   per chunk: nonce(12) + encLen(4) + ciphertext(encLen bytes)
-
 var (
-	aesKey       []byte
-	tokenSecret  []byte
-	fileData     []byte
-	chunkCount   int
-	chunkOffsets []int // byte offset of each chunk entry in fileData
+	cencKey     []byte // 16 байт — AES-128 ключ CENC
+	cencKID     []byte // 16 байт — key ID
+	tokenSecret []byte
+	videoPath   string
+	videoMime   string // MIME с codecs для MediaSource.addSourceBuffer
 )
 
+func mustHex16(env string) []byte {
+	v := os.Getenv(env)
+	if v == "" {
+		log.Fatalf("%s env var not set (32 hex chars = 16 bytes)", env)
+	}
+	b, err := hex.DecodeString(v)
+	if err != nil || len(b) != 16 {
+		log.Fatalf("%s must be 32 hex chars (16 bytes)", env)
+	}
+	return b
+}
+
 func loadConfig() {
-	keyHex := os.Getenv("AES_KEY")
-	if keyHex == "" {
-		log.Fatal("AES_KEY env var not set (64 hex chars = 32-byte AES-256 key)")
-	}
-	var err error
-	aesKey, err = hex.DecodeString(keyHex)
-	if err != nil || len(aesKey) != 32 {
-		log.Fatal("AES_KEY must be 64 hex chars (32 bytes)")
-	}
+	cencKey = mustHex16("CENC_KEY")
+	cencKID = mustHex16("CENC_KID")
 
 	secret := os.Getenv("TOKEN_SECRET")
 	if secret == "" {
@@ -46,34 +56,10 @@ func loadConfig() {
 	tokenSecret = []byte(secret)
 }
 
-func loadVideo(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		log.Fatalf("Cannot read %s: %v\n\nHint: encrypt your video first with the encoder tool:\n  encoder input.mp4 data/input.enc <AES_KEY_HEX>", path, err)
-	}
-	if len(data) < 16 || string(data[:4]) != "EDRM" {
-		log.Fatalf("Invalid EDRM file: %s", path)
-	}
-
-	n := int(binary.LittleEndian.Uint32(data[8:12]))
-	fileData = data
-	chunkCount = n
-
-	chunkOffsets = make([]int, n)
-	offset := 16
-	for i := 0; i < n; i++ {
-		if offset+16 > len(data) {
-			log.Fatalf("File truncated at chunk %d", i)
-		}
-		chunkOffsets[i] = offset
-		encLen := int(binary.LittleEndian.Uint32(data[offset+12 : offset+16]))
-		offset += 12 + 4 + encLen
-	}
-	log.Printf("Loaded encrypted video: %d chunks (%d bytes total)", n, len(data))
-}
-
-// Token = base64url( hourTimestamp + "." + base64url(HMAC-SHA256(hourTimestamp)) )
-// Valid for current and previous hour (~up to 2 hours window).
+// ------------------------------------------------------------------
+// Токены: base64url( hour + "." + base64url(HMAC-SHA256(hour)) ),
+// действительны в текущий и предыдущий час.
+// ------------------------------------------------------------------
 
 func makeToken() string {
 	hour := strconv.FormatInt(time.Now().Unix()/3600, 10)
@@ -110,15 +96,18 @@ func validToken(token string) bool {
 	return hmac.Equal([]byte(gotSig), []byte(wantSig))
 }
 
+func withToken(r *http.Request) bool {
+	return validToken(r.URL.Query().Get("token"))
+}
+
 // ------------------------------------------------------------------
-// HTML player template (embedded in binary — no static files needed)
+// Плеер (встроен в бинарник)
 // ------------------------------------------------------------------
 
 var playerTmpl = template.Must(template.New("player").Parse(`<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="drm-token" content="{{.Token}}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Video Player</title>
 <style>
@@ -127,79 +116,93 @@ var playerTmpl = template.Must(template.New("player").Parse(`<!DOCTYPE html>
          display: flex; flex-direction: column; align-items: center;
          justify-content: center; min-height: 100vh; gap: 16px; }
   video { max-width: min(960px, 100vw); max-height: 80vh; background: #000; }
-  #status { font-size: 14px; opacity: .8; }
-  #bar { width: min(480px, 90vw); height: 6px; background: #333; border-radius: 3px; display: none; }
-  #fill { height: 100%; width: 0; background: #4af; border-radius: 3px; transition: width .2s; }
+  #status { font-size: 14px; opacity: .8; min-height: 1em; }
 </style>
 </head>
 <body>
 <video id="v" controls></video>
-<div id="status">Подготовка...</div>
-<div id="bar"><div id="fill"></div></div>
+<div id="status"></div>
 <script>
 (async () => {
-  const TOKEN   = document.querySelector('meta[name="drm-token"]').content;
-  const status  = document.getElementById('status');
-  const bar     = document.getElementById('bar');
-  const fill    = document.getElementById('fill');
-  const video   = document.getElementById('v');
-
-  const setProgress = (v) => { fill.style.width = (v * 100).toFixed(1) + '%'; };
+  const TOKEN = {{.Token}};
+  const KID   = {{.KID}};  // base64url
+  const MIME  = {{.Mime}}; // например: video/mp4; codecs="avc1.64001F, mp4a.40.2"
+  const video  = document.getElementById('v');
+  const status = document.getElementById('status');
 
   try {
-    // Fetch key and meta in parallel
-    const [kr, mr] = await Promise.all([
-      fetch('/key?token='        + TOKEN),
-      fetch('/video/meta?token=' + TOKEN),
+    // --- EME Clear Key ---
+    const access = await navigator.requestMediaKeySystemAccess('org.w3.clearkey', [
+      { initDataTypes: ['keyids', 'cenc'], videoCapabilities: [{ contentType: MIME }] },
     ]);
-    if (!kr.ok) throw new Error('Ошибка авторизации (' + kr.status + ')');
-    if (!mr.ok) throw new Error('Ошибка метаданных ('  + mr.status + ')');
+    const mediaKeys = await access.createMediaKeys();
+    await video.setMediaKeys(mediaKeys);
 
-    const { key: keyB64 }  = await kr.json();
-    const { chunks }       = await mr.json();
+    const session = mediaKeys.createSession();
+    session.addEventListener('message', async (e) => {
+      // e.message — запрос лицензии от CDM браузера; ответ — JWK Set с ключом
+      const res = await fetch('/license?token=' + TOKEN, { method: 'POST', body: e.message });
+      if (!res.ok) {
+        status.textContent = 'Ошибка лицензии (' + res.status + ')';
+        return;
+      }
+      await session.update(await res.arrayBuffer());
+    });
 
-    const keyBytes  = Uint8Array.from(atob(keyB64), c => c.charCodeAt(0));
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']
-    );
+    // KID известен заранее — запрашиваем ключ явно, не дожидаясь события
+    // encrypted (ffmpeg не пишет PSSH-бокс в MP4).
+    await session.generateRequest('keyids',
+      new TextEncoder().encode(JSON.stringify({ kids: [KID] })));
 
-    // Download all chunks in parallel, track progress
-    status.textContent = 'Загрузка...';
-    bar.style.display = 'block';
-    let done = 0;
+    // --- MSE: браузеры поддерживают EME только через MediaSource ---
+    if (!MediaSource.isTypeSupported(MIME)) {
+      throw new Error('Браузер не поддерживает ' + MIME);
+    }
+    const ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+    await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
+    const sb = ms.addSourceBuffer(MIME);
 
-    const encBuffers = await Promise.all(
-      Array.from({ length: chunks }, (_, i) =>
-        fetch('/video/chunk/' + i + '?token=' + TOKEN)
-          .then(r => { if (!r.ok) throw new Error('chunk ' + i); return r.arrayBuffer(); })
-          .then(buf => { setProgress(++done / chunks * 0.5); return buf; })
-      )
-    );
+    const appendDone = () => new Promise((resolve, reject) => {
+      sb.addEventListener('updateend', resolve, { once: true });
+      sb.addEventListener('error', () => reject(new Error('SourceBuffer error')), { once: true });
+    });
 
-    // Decrypt chunks (browser can parallelise this too)
-    status.textContent = 'Расшифровка...';
-    const plains = await Promise.all(
-      encBuffers.map(async (buf, i) => {
-        const a      = new Uint8Array(buf);
-        const nonce  = a.slice(0, 12);
-        const cipher = a.slice(16); // skip nonce(12) + encLen(4)
-        const plain  = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, cryptoKey, cipher);
-        setProgress(0.5 + (i + 1) / chunks * 0.5);
-        return plain;
-      })
-    );
+    const append = async (buf) => {
+      for (;;) {
+        try {
+          sb.appendBuffer(buf);
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') {
+            // Буфер полон: выкидываем уже просмотренное и ждём прогресса
+            const keep = Math.max(0, video.currentTime - 10);
+            if (keep > 0 && sb.buffered.length && sb.buffered.start(0) < keep) {
+              sb.remove(sb.buffered.start(0), keep);
+              await appendDone();
+            } else {
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            continue;
+          }
+          throw e;
+        }
+        await appendDone();
+        return;
+      }
+    };
 
-    // Concatenate and create blob URL
-    const total    = plains.reduce((s, p) => s + p.byteLength, 0);
-    const combined = new Uint8Array(total);
-    let offset = 0;
-    for (const p of plains) { combined.set(new Uint8Array(p), offset); offset += p.byteLength; }
+    const resp = await fetch('/video.mp4?token=' + TOKEN);
+    if (!resp.ok) throw new Error('Ошибка загрузки видео (' + resp.status + ')');
 
-    video.src = URL.createObjectURL(new Blob([combined], { type: 'video/mp4' }));
-    video.play().catch(() => {});
-    bar.style.display  = 'none';
-    status.textContent = '';
+    video.play().catch(() => {}); // autoplay может быть заблокирован — не страшно
 
+    const reader = resp.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await append(value);
+    }
+    if (ms.readyState === 'open') ms.endOfStream();
   } catch (e) {
     status.textContent = 'Ошибка: ' + e.message;
     console.error(e);
@@ -212,14 +215,6 @@ var playerTmpl = template.Must(template.New("player").Parse(`<!DOCTYPE html>
 
 // ------------------------------------------------------------------
 
-func noCache(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-store")
-}
-
-func withToken(r *http.Request) bool {
-	return validToken(r.URL.Query().Get("token"))
-}
-
 func main() {
 	loadConfig()
 
@@ -227,82 +222,107 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	loadVideo(wd + "/data/input.enc")
+	videoPath = wd + "/data/video.mp4"
+	if _, err := os.Stat(videoPath); err != nil {
+		log.Fatalf("Cannot open %s: %v\n\nHint: package your video first:\n  packager input.mp4 data/video.mp4 $CENC_KEY $CENC_KID", videoPath, err)
+	}
+
+	// Метаданные с MIME/codecs пишет packager рядом с видео
+	metaRaw, err := os.ReadFile(videoPath + ".json")
+	if err != nil {
+		log.Fatalf("Cannot read %s.json: %v (produced by the packager)", videoPath, err)
+	}
+	var meta struct {
+		Mime string `json:"mime"`
+	}
+	if err := json.Unmarshal(metaRaw, &meta); err != nil || meta.Mime == "" {
+		log.Fatalf("Invalid %s.json: %v", videoPath, err)
+	}
+	videoMime = meta.Mime
+	log.Printf("Serving CENC-encrypted video: %s (%s)", videoPath, videoMime)
+
+	kidB64 := base64.RawURLEncoding.EncodeToString(cencKID)
 
 	mux := http.NewServeMux()
 
-	// Player page — embeds a fresh signed token
+	// Страница плеера — со свежим подписанным токеном
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		noCache(w)
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		playerTmpl.Execute(w, map[string]string{"Token": makeToken()})
-	})
-
-	// Return AES key as base64 JSON (requires valid token)
-	mux.HandleFunc("/key", func(w http.ResponseWriter, r *http.Request) {
-		noCache(w)
-		if !withToken(r) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"key": base64.StdEncoding.EncodeToString(aesKey),
+		playerTmpl.Execute(w, map[string]string{
+			"Token": makeToken(),
+			"KID":   kidB64,
+			"Mime":  videoMime,
 		})
 	})
 
-	// Return total chunk count (requires valid token)
-	mux.HandleFunc("/video/meta", func(w http.ResponseWriter, r *http.Request) {
-		noCache(w)
+	// Clear Key license: CDM присылает {"kids":[...]}, отвечаем JWK Set
+	mux.HandleFunc("/license", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if !withToken(r) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			KIDs []string `json:"kids"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Bad license request", http.StatusBadRequest)
+			return
+		}
+		requested := false
+		for _, k := range req.KIDs {
+			if k == kidB64 {
+				requested = true
+				break
+			}
+		}
+		if !requested {
+			http.Error(w, "Unknown key ID", http.StatusForbidden)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]int{"chunks": chunkCount})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"keys": []map[string]string{{
+				"kty": "oct",
+				"kid": kidB64,
+				"k":   base64.RawURLEncoding.EncodeToString(cencKey),
+			}},
+			"type": "temporary",
+		})
 	})
 
-	// Return one encrypted chunk: nonce(12) + encLen(4) + ciphertext (requires valid token)
-	mux.HandleFunc("/video/chunk/", func(w http.ResponseWriter, r *http.Request) {
-		noCache(w)
+	// Зашифрованный CENC-файл; http.ServeFile даёт Range из коробки — перемотка работает
+	mux.HandleFunc("/video.mp4", func(w http.ResponseWriter, r *http.Request) {
 		if !withToken(r) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		idxStr := strings.TrimPrefix(r.URL.Path, "/video/chunk/")
-		n, err := strconv.Atoi(idxStr)
-		if err != nil || n < 0 || n >= chunkCount {
-			http.Error(w, "Invalid chunk index", http.StatusBadRequest)
-			return
-		}
-		off := chunkOffsets[n]
-		encLen := int(binary.LittleEndian.Uint32(fileData[off+12 : off+16]))
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(fileData[off : off+12+4+encLen])
+		http.ServeFile(w, r, videoPath)
 	})
 
-	cors := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if origin := r.Header.Get("Origin"); origin != "" {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			}
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			if r.Method == http.MethodOptions {
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
-
-	addr := ":8080"
+	addr := ":" + port
 	log.Printf("Listening on %s", addr)
-	if err := http.ListenAndServe(addr, cors(mux)); err != nil {
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
 }
-
